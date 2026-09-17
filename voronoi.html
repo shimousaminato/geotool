@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voronoi Survey — OpenStreetMap</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink: #21261f;
+    --paper: #ece4cf;
+    --paper-deep: #e2d8bd;
+    --paper-line: #cdbe95;
+    --blue: #2f5d77;
+    --danger: #a23b2e;
+    --muted: #5b5647;
+    --font-serif: 'Spectral', Georgia, 'Hiragino Mincho ProN', serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace;
+  }
+
+  *{ box-sizing: border-box; }
+  html, body{ height: 100%; margin: 0; }
+  body{
+    font-family: var(--font-mono);
+    color: var(--ink);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ---------- Top tab bar ---------- */
+  .tabbar{
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px 0 16px;
+    background: var(--paper-deep);
+    border-bottom: 2px solid var(--ink);
+    flex-wrap: wrap;
+  }
+  .tabs{ display: flex; gap: 4px; }
+  .tab{
+    font-family: var(--font-serif);
+    font-size: 15px;
+    font-weight: 500;
+    padding: 8px 18px;
+    background: transparent;
+    color: var(--muted);
+    border: 1.5px solid var(--paper-line);
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+    cursor: pointer;
+    margin-bottom: -2px;
+  }
+  .tab:hover{ color: var(--ink); }
+  .tab.active{
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  .file-actions{ display: flex; gap: 8px; padding-bottom: 8px; }
+
+  /* ---------- Layout ---------- */
+  #app{ display: flex; flex: 1; min-height: 0; }
+
+  #panel{
+    width: 360px;
+    flex-shrink: 0;
+    background: var(--paper);
+    border-right: 2px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel-scroll{
+    overflow-y: auto;
+    flex: 1;
+    padding: 20px 20px 14px 20px;
+  }
+  .panel-scroll[hidden]{ display: none; }
+
+  h1{
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 24px;
+    margin: 0 0 4px 0;
+  }
+  .subtitle{
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin: 0 0 18px 0;
+  }
+  .section-label{
+    font-size: 11px;
+    color: var(--muted);
+    margin: 0 0 8px 0;
+  }
+  .divider{
+    border: none;
+    border-top: 1.5px dashed var(--paper-line);
+    margin: 18px 0;
+  }
+  .hint{
+    font-size: 11.5px;
+    color: var(--muted);
+    margin: 10px 0 0 0;
+    line-height: 1.6;
+  }
+  .empty-note{
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+    margin-top: 10px;
+  }
+
+  input[type="text"]{
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1.5px solid var(--ink);
+    background: #f5efdd;
+    color: var(--ink);
+    border-radius: 2px;
+    width: 100%;
+  }
+  input:focus, select:focus, button:focus-visible{
+    outline: 2px solid var(--blue);
+    outline-offset: 1px;
+  }
+
+  select{
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    padding: 4px 6px;
+    border: 1.5px solid var(--paper-line);
+    background: #f5efdd;
+    color: var(--ink);
+    border-radius: 2px;
+    max-width: 130px;
+  }
+
+  .stamp-btn{
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink);
+    background: transparent;
+    border: 1.5px solid var(--ink);
+    border-radius: 2px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+    white-space: nowrap;
+  }
+  .stamp-btn:hover{ background: var(--ink); color: var(--paper); }
+  .stamp-btn:active{ transform: translateY(1px); }
+  .stamp-btn:disabled{ opacity: 0.35; cursor: not-allowed; }
+  .stamp-btn:disabled:hover{ background: transparent; color: var(--ink); }
+  .stamp-btn.wide{ width: 100%; }
+  .stamp-btn.danger{ border-color: var(--danger); color: var(--danger); }
+  .stamp-btn.danger:hover{ background: var(--danger); color: var(--paper); }
+  .btn-row{ display: flex; gap: 8px; margin-top: 10px; }
+  .btn-row .stamp-btn{ flex: 1; }
+
+  /* Lists */
+  ul.record-list{ list-style: none; margin: 12px 0 0 0; padding: 0; }
+  ul.record-list li{
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--paper-line);
+    font-size: 12.5px;
+  }
+  .point-dot{
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 3px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9.5px;
+    color: var(--paper);
+    font-weight: 600;
+  }
+  .point-body{ flex: 1; min-width: 0; }
+  .inline-input{
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed var(--paper-line);
+    padding: 2px 0;
+    width: 100%;
+  }
+  .inline-input:focus{ outline: none; border-bottom: 1px solid var(--blue); }
+  .point-coords{
+    display: block;
+    color: var(--muted);
+    font-size: 10.5px;
+    margin-top: 3px;
+  }
+  .row-remove{
+    background: none; border: none; cursor: pointer;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    margin-top: 2px;
+  }
+  .row-remove:hover{ color: var(--danger); }
+
+  input[type="color"]{
+    width: 26px; height: 26px;
+    padding: 0;
+    border: 1.5px solid var(--ink);
+    border-radius: 2px;
+    background: none;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .assign-row{ display: flex; align-items: center; gap: 8px; width: 100%; }
+  .assign-name{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .status-bar{
+    font-size: 11.5px;
+    padding: 10px 20px;
+    border-top: 1.5px solid var(--ink);
+    color: var(--muted);
+    background: var(--paper-deep);
+  }
+  .status-bar.error{ color: var(--danger); }
+
+  /* Map */
+  #map{ flex: 1; height: 100%; background: #dcd6c4; }
+  .site-icon{
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    border: 1.5px solid var(--ink);
+  }
+  .leaflet-container{ font-family: var(--font-mono); }
+
+  /* KML text fallback overlay */
+  #kml-overlay{
+    position: fixed; inset: 0;
+    background: rgba(33,38,31,0.55);
+    display: none;
+    align-items: center; justify-content: center;
+    padding: 24px;
+    z-index: 2000;
+  }
+  #kml-overlay.open{ display: flex; }
+  .kml-box{
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    padding: 18px;
+    width: min(680px, 100%);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .kml-box textarea{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    width: 100%;
+    flex: 1;
+    min-height: 260px;
+    border: 1.5px solid var(--paper-line);
+    background: #f5efdd;
+    padding: 10px;
+    resize: vertical;
+  }
+
+  @media (max-width: 760px){
+    #app{ flex-direction: column; }
+    #panel{
+      width: 100%;
+      max-height: 44vh;
+      border-right: none;
+      border-bottom: 2px solid var(--ink);
+    }
+    #map{ flex: 1; min-height: 260px; }
+    .tabbar{ padding: 8px 10px 0 10px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="tabbar">
+  <div class="tabs">
+    <button class="tab active" id="tab-editor" type="button">エディタ</button>
+    <button class="tab" id="tab-visual" type="button">ヴィジュアル</button>
+  </div>
+  <div class="file-actions">
+    <button class="stamp-btn" id="import-btn" type="button">KMLを読み込む</button>
+    <button class="stamp-btn" id="export-btn" type="button">KMLを書き出す</button>
+    <input type="file" id="file-input" accept=".kml,application/vnd.google-earth.kml+xml,text/xml" hidden>
+  </div>
+</div>
+
+<div id="app">
+  <aside id="panel">
+
+    <!-- ===== Editor mode ===== -->
+    <div class="panel-scroll" id="editor-panel">
+      <h1>Voronoi Survey</h1>
+      <p class="subtitle">OpenStreetMapの地図上に地点を置き、ボロノイ図（勢力圏図）を作成します。地図をクリックして地点を追加し、名前を付けてください。</p>
+
+      <p class="section-label">地点一覧（<span id="point-count">0</span>）</p>
+      <ul class="record-list" id="point-list"></ul>
+      <p class="empty-note" id="empty-note">まだ地点がありません。地図をクリックして追加してください。</p>
+
+      <div class="btn-row">
+        <button class="stamp-btn wide" id="toggle-btn" disabled>ボロノイ図を表示</button>
+      </div>
+      <div class="btn-row">
+        <button class="stamp-btn wide danger" id="clear-btn" disabled>地点をすべて消す</button>
+      </div>
+
+      <p class="hint">作成した地点とボロノイ領域は、上部の「KMLを書き出す」からKMLファイルとして保存できます。</p>
+    </div>
+
+    <!-- ===== Visual mode ===== -->
+    <div class="panel-scroll" id="visual-panel" hidden>
+      <h1>ヴィジュアル</h1>
+      <p class="subtitle">地点を色分けグループに割り当てると、ボロノイ領域がそのグループの色で塗られます。色はいつでも変更でき、結果はKMLとして書き出せます。</p>
+
+      <p class="section-label">色分けグループ</p>
+      <ul class="record-list" id="group-list"></ul>
+      <p class="empty-note" id="group-empty-note">グループがありません。下のボタンで追加してください。</p>
+
+      <div class="btn-row">
+        <button class="stamp-btn wide" id="add-group-btn">色分けを追加</button>
+      </div>
+
+      <hr class="divider">
+
+      <p class="section-label">地点の割り当て</p>
+      <ul class="record-list" id="assign-list"></ul>
+      <p class="empty-note" id="assign-empty-note">地点がありません。エディタタブで追加するか、KMLを読み込んでください。</p>
+    </div>
+
+    <div class="status-bar" id="status-bar">地図データ: © OpenStreetMap contributors</div>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<div id="kml-overlay">
+  <div class="kml-box">
+    <p class="section-label" style="margin:0;">KMLテキスト（ダウンロードできない場合はコピーして保存してください）</p>
+    <textarea id="kml-text" readonly></textarea>
+    <div class="btn-row" style="margin:0;">
+      <button class="stamp-btn" id="kml-copy-btn">コピー</button>
+      <button class="stamp-btn" id="kml-close-btn">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+
+<script>
+(function(){
+  const PALETTE = ['#2e6e62', '#9c7c2c', '#2f5d77', '#6b4c6b', '#62702f', '#8c4a3a', '#47586a', '#7a6a2e'];
+  const GROUP_PALETTE = ['#2e6e62', '#9c7c2c', '#2f5d77', '#8c4a3a', '#6b4c6b', '#62702f', '#47586a', '#a05a20'];
+  const UNGROUPED_COLOR = '#8a8371';
+  const paletteColor = i => PALETTE[i % PALETTE.length];
+
+  let points = [];      // {lat, lng, name, groupId}
+  let groups = [];       // {id, name, color}
+  let mode = 'editor';   // 'editor' | 'visual'
+  let voronoiActive = false;
+  let nextPointNumber = 1;
+  let nextGroupNumber = 1;
+  let uidCounter = 0;
+  let markerRefs = [];
+  let statusTimer = null;
+
+  const uid = () => `g${++uidCounter}`;
+
+  // ---------- Map ----------
+  const map = L.map('map', { zoomControl: true }).setView([35.85, 139.72], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  const markerLayer = L.layerGroup().addTo(map);
+  const voronoiLayer = L.layerGroup().addTo(map);
+
+  map.on('click', e => {
+    if (mode !== 'editor') return;
+    addPoint(e.latlng.lat, e.latlng.lng);
+  });
+  map.on('moveend zoomend', () => { if (voronoiActive) drawVoronoi(); });
+
+  // ---------- Status ----------
+  const statusBar = document.getElementById('status-bar');
+  const defaultStatus = '地図データ: © OpenStreetMap contributors';
+  function showStatus(msg, isError){
+    statusBar.textContent = msg;
+    statusBar.classList.toggle('error', !!isError);
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      statusBar.textContent = defaultStatus;
+      statusBar.classList.remove('error');
+    }, 4500);
+  }
+
+  // ---------- Colors ----------
+  function groupOf(p){
+    if (!p.groupId) return null;
+    return groups.find(g => g.id === p.groupId) || null;
+  }
+  function colorForPoint(p, i){
+    if (mode === 'visual'){
+      const g = groupOf(p);
+      return g ? g.color : UNGROUPED_COLOR;
+    }
+    return paletteColor(i);
+  }
+
+  // ---------- Point operations ----------
+  function addPoint(lat, lng){
+    points.push({ lat, lng, name: `地点${nextPointNumber}`, groupId: null });
+    nextPointNumber += 1;
+    if (points.length >= 2) voronoiActive = true;
+    renderAll();
+  }
+
+  function removePoint(i){
+    points.splice(i, 1);
+    if (points.length < 2){
+      voronoiActive = false;
+      voronoiLayer.clearLayers();
+    }
+    renderAll();
+  }
+
+  function clearAll(){
+    points = [];
+    nextPointNumber = 1;
+    voronoiActive = false;
+    voronoiLayer.clearLayers();
+    renderAll();
+  }
+
+  // ---------- Rendering ----------
+  function renderAll(){
+    renderPointList();
+    renderGroupList();
+    renderAssignList();
+    redrawMap();
+    document.getElementById('toggle-btn').disabled = points.length < 2;
+    document.getElementById('toggle-btn').textContent = voronoiActive ? 'ボロノイ図を隠す' : 'ボロノイ図を表示';
+    document.getElementById('clear-btn').disabled = points.length === 0;
+  }
+
+  function redrawMap(){
+    renderMarkers();
+    if (voronoiActive && points.length >= 2) drawVoronoi();
+    else voronoiLayer.clearLayers();
+  }
+
+  function renderMarkers(){
+    markerLayer.clearLayers();
+    markerRefs = points.map((p, i) => {
+      const color = colorForPoint(p, i);
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class="site-icon" style="background:${color}">${i + 1}</div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+      const marker = L.marker([p.lat, p.lng], { icon }).addTo(markerLayer);
+      marker.bindTooltip(tooltipFor(p), { direction: 'top', offset: [0, -10] });
+      return marker;
+    });
+  }
+
+  function tooltipFor(p){
+    const g = groupOf(p);
+    return g ? `${p.name}（${g.name}）` : p.name;
+  }
+
+  function renderPointList(){
+    const list = document.getElementById('point-list');
+    document.getElementById('point-count').textContent = points.length;
+    document.getElementById('empty-note').style.display = points.length ? 'none' : 'block';
+    list.innerHTML = '';
+
+    points.forEach((p, i) => {
+      const li = document.createElement('li');
+
+      const dot = document.createElement('span');
+      dot.className = 'point-dot';
+      dot.style.background = paletteColor(i);
+      dot.textContent = i + 1;
+
+      const body = document.createElement('div');
+      body.className = 'point-body';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'inline-input';
+      nameInput.value = p.name;
+      nameInput.setAttribute('aria-label', `地点${i + 1}の名前`);
+      nameInput.addEventListener('input', () => {
+        p.name = nameInput.value;
+        if (markerRefs[i]) markerRefs[i].setTooltipContent(tooltipFor(p) || `地点${i + 1}`);
+      });
+
+      const coords = document.createElement('span');
+      coords.className = 'point-coords';
+      coords.textContent = `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`;
+
+      body.appendChild(nameInput);
+      body.appendChild(coords);
+
+      const remove = document.createElement('button');
+      remove.className = 'row-remove';
+      remove.textContent = '×';
+      remove.title = '削除';
+      remove.addEventListener('click', () => removePoint(i));
+
+      li.appendChild(dot);
+      li.appendChild(body);
+      li.appendChild(remove);
+      list.appendChild(li);
+    });
+  }
+
+  // ---------- Groups ----------
+  function addGroup(name, color){
+    const g = {
+      id: uid(),
+      name: name || `色分け${nextGroupNumber}`,
+      color: color || GROUP_PALETTE[(groups.length) % GROUP_PALETTE.length]
+    };
+    nextGroupNumber += 1;
+    groups.push(g);
+    return g;
+  }
+
+  function removeGroup(id){
+    groups = groups.filter(g => g.id !== id);
+    points.forEach(p => { if (p.groupId === id) p.groupId = null; });
+    renderAll();
+  }
+
+  function renderGroupList(){
+    const list = document.getElementById('group-list');
+    document.getElementById('group-empty-note').style.display = groups.length ? 'none' : 'block';
+    list.innerHTML = '';
+
+    groups.forEach(g => {
+      const li = document.createElement('li');
+
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.value = g.color;
+      colorInput.title = '色を選ぶ';
+      colorInput.addEventListener('input', () => {
+        g.color = colorInput.value;
+        redrawMap();
+        refreshAssignDots();
+      });
+
+      const body = document.createElement('div');
+      body.className = 'point-body';
+
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'inline-input';
+      nameInput.value = g.name;
+      nameInput.setAttribute('aria-label', 'グループ名');
+      nameInput.addEventListener('input', () => {
+        g.name = nameInput.value;
+        refreshAssignOptions();
+        renderMarkers();
+      });
+
+      const count = document.createElement('span');
+      count.className = 'point-coords';
+      const n = points.filter(p => p.groupId === g.id).length;
+      count.textContent = `${n} 地点`;
+
+      body.appendChild(nameInput);
+      body.appendChild(count);
+
+      const remove = document.createElement('button');
+      remove.className = 'row-remove';
+      remove.textContent = '×';
+      remove.title = 'グループを削除';
+      remove.addEventListener('click', () => removeGroup(g.id));
+
+      li.appendChild(colorInput);
+      li.appendChild(body);
+      li.appendChild(remove);
+      list.appendChild(li);
+    });
+  }
+
+  function renderAssignList(){
+    const list = document.getElementById('assign-list');
+    document.getElementById('assign-empty-note').style.display = points.length ? 'none' : 'block';
+    list.innerHTML = '';
+
+    points.forEach((p, i) => {
+      const li = document.createElement('li');
+      const row = document.createElement('div');
+      row.className = 'assign-row';
+
+      const dot = document.createElement('span');
+      dot.className = 'point-dot assign-dot';
+      dot.style.background = colorForPoint(p, i);
+      dot.textContent = i + 1;
+
+      const label = document.createElement('span');
+      label.className = 'assign-name';
+      label.textContent = p.name;
+
+      const select = document.createElement('select');
+      select.className = 'assign-select';
+      select.setAttribute('aria-label', `${p.name}のグループ`);
+      fillSelect(select, p.groupId);
+      select.addEventListener('change', () => {
+        p.groupId = select.value || null;
+        dot.style.background = colorForPoint(p, i);
+        redrawMap();
+        renderGroupList();
+      });
+
+      row.appendChild(dot);
+      row.appendChild(label);
+      row.appendChild(select);
+      li.appendChild(row);
+      list.appendChild(li);
+    });
+  }
+
+  function fillSelect(select, selectedId){
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '未分類';
+    select.appendChild(none);
+    groups.forEach(g => {
+      const opt = document.createElement('option');
+      opt.value = g.id;
+      opt.textContent = g.name;
+      select.appendChild(opt);
+    });
+    select.value = selectedId || '';
+  }
+
+  function refreshAssignOptions(){
+    const selects = document.querySelectorAll('.assign-select');
+    selects.forEach((select, i) => fillSelect(select, points[i] ? points[i].groupId : ''));
+  }
+
+  function refreshAssignDots(){
+    const dots = document.querySelectorAll('.assign-dot');
+    dots.forEach((dot, i) => {
+      if (points[i]) dot.style.background = colorForPoint(points[i], i);
+    });
+  }
+
+  document.getElementById('add-group-btn').addEventListener('click', () => {
+    addGroup();
+    renderGroupList();
+    refreshAssignOptions();
+  });
+
+  // ---------- Voronoi ----------
+  function computeCells(){
+    if (points.length < 2) return [];
+    const bounds = map.getBounds();
+    const nw = map.latLngToLayerPoint(bounds.getNorthWest());
+    const se = map.latLngToLayerPoint(bounds.getSouthEast());
+    const margin = 400;
+    const box = [nw.x - margin, nw.y - margin, se.x + margin, se.y + margin];
+
+    const sites = points.map(p => {
+      const pt = map.latLngToLayerPoint([p.lat, p.lng]);
+      return [pt.x, pt.y];
+    });
+
+    const voronoi = d3.Delaunay.from(sites).voronoi(box);
+    const cells = [];
+    points.forEach((p, i) => {
+      const cell = voronoi.cellPolygon(i);
+      if (!cell) return;
+      cells.push({ index: i, latlngs: cell.map(([x, y]) => map.layerPointToLatLng([x, y])) });
+    });
+    return cells;
+  }
+
+  function drawVoronoi(){
+    voronoiLayer.clearLayers();
+    computeCells().forEach(cell => {
+      const p = points[cell.index];
+      const color = colorForPoint(p, cell.index);
+      L.polygon(cell.latlngs, {
+        color: color,
+        weight: 2,
+        opacity: 0.85,
+        fillColor: color,
+        fillOpacity: 0.18
+      }).addTo(voronoiLayer);
+    });
+  }
+
+  document.getElementById('toggle-btn').addEventListener('click', () => {
+    voronoiActive = !voronoiActive;
+    renderAll();
+  });
+
+  document.getElementById('clear-btn').addEventListener('click', clearAll);
+
+  // ---------- Mode tabs ----------
+  const tabEditor = document.getElementById('tab-editor');
+  const tabVisual = document.getElementById('tab-visual');
+
+  function setMode(next){
+    mode = next;
+    tabEditor.classList.toggle('active', mode === 'editor');
+    tabVisual.classList.toggle('active', mode === 'visual');
+    document.getElementById('editor-panel').hidden = mode !== 'editor';
+    document.getElementById('visual-panel').hidden = mode !== 'visual';
+    if (mode === 'visual' && groups.length === 0){
+      addGroup();
+      addGroup();
+    }
+    renderAll();
+    setTimeout(() => map.invalidateSize(), 50);
+  }
+
+  tabEditor.addEventListener('click', () => setMode('editor'));
+  tabVisual.addEventListener('click', () => setMode('visual'));
+
+  // ---------- KML ----------
+  function esc(s){
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // KML color is aabbggrr
+  function kmlColor(hex, alpha){
+    const h = (hex || '#000000').replace('#', '');
+    const rr = h.slice(0, 2), gg = h.slice(2, 4), bb = h.slice(4, 6);
+    return `${alpha}${bb}${gg}${rr}`.toLowerCase();
+  }
+
+  function buildKml(){
+    const cells = computeCells();
+    let kml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    kml += '<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n';
+    kml += '  <name>Voronoi Survey</name>\n';
+
+    points.forEach((p, i) => {
+      const color = colorForPoint(p, i);
+      kml += `  <Style id="cell${i}">\n`;
+      kml += `    <LineStyle><color>${kmlColor(color, 'ff')}</color><width>2</width></LineStyle>\n`;
+      kml += `    <PolyStyle><color>${kmlColor(color, '55')}</color></PolyStyle>\n`;
+      kml += '  </Style>\n';
+    });
+
+    kml += '  <Folder>\n    <name>地点</name>\n';
+    points.forEach((p, i) => {
+      const g = groupOf(p);
+      kml += '    <Placemark>\n';
+      kml += `      <name>${esc(p.name)}</name>\n`;
+      kml += '      <ExtendedData>\n';
+      kml += `        <Data name="group"><value>${esc(g ? g.name : '')}</value></Data>\n`;
+      kml += `        <Data name="groupColor"><value>${g ? g.color : ''}</value></Data>\n`;
+      kml += '      </ExtendedData>\n';
+      kml += `      <Point><coordinates>${p.lng.toFixed(6)},${p.lat.toFixed(6)},0</coordinates></Point>\n`;
+      kml += '    </Placemark>\n';
+    });
+    kml += '  </Folder>\n';
+
+    if (cells.length){
+      kml += '  <Folder>\n    <name>ボロノイ領域</name>\n';
+      cells.forEach(cell => {
+        const p = points[cell.index];
+        const ring = cell.latlngs.map(ll => `${ll.lng.toFixed(6)},${ll.lat.toFixed(6)},0`);
+        if (ring.length && ring[0] !== ring[ring.length - 1]) ring.push(ring[0]);
+        kml += '    <Placemark>\n';
+        kml += `      <name>${esc(p.name)} の領域</name>\n`;
+        kml += `      <styleUrl>#cell${cell.index}</styleUrl>\n`;
+        kml += '      <Polygon><outerBoundaryIs><LinearRing>\n';
+        kml += `        <coordinates>${ring.join(' ')}</coordinates>\n`;
+        kml += '      </LinearRing></outerBoundaryIs></Polygon>\n';
+        kml += '    </Placemark>\n';
+      });
+      kml += '  </Folder>\n';
+    }
+
+    kml += '</Document>\n</kml>\n';
+    return kml;
+  }
+
+  function exportKml(){
+    if (!points.length){ showStatus('書き出す地点がありません', true); return; }
+    const kml = buildKml();
+    try{
+      const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'voronoi.kml';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showStatus('KMLを書き出しました（右クリックでテキスト表示も可能）');
+    }catch(e){
+      showStatus('ダウンロードできなかったため、テキストで表示します', true);
+    }
+    document.getElementById('kml-text').value = kml;
+  }
+
+  function parseKml(text){
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('parse');
+
+    const placemarks = Array.from(doc.getElementsByTagName('Placemark'));
+    const newPoints = [];
+    const groupMap = new Map();
+
+    placemarks.forEach(pm => {
+      const pointEl = pm.getElementsByTagName('Point')[0];
+      if (!pointEl) return;
+      const coordEl = pointEl.getElementsByTagName('coordinates')[0];
+      if (!coordEl) return;
+      const parts = coordEl.textContent.trim().split(/\s+/)[0].split(',');
+      const lng = parseFloat(parts[0]);
+      const lat = parseFloat(parts[1]);
+      if (!isFinite(lat) || !isFinite(lng)) return;
+
+      const nameEl = pm.getElementsByTagName('name')[0];
+      const name = nameEl ? nameEl.textContent.trim() : `地点${newPoints.length + 1}`;
+
+      let gName = '', gColor = '';
+      Array.from(pm.getElementsByTagName('Data')).forEach(d => {
+        const key = d.getAttribute('name');
+        const valueEl = d.getElementsByTagName('value')[0];
+        const value = valueEl ? valueEl.textContent.trim() : '';
+        if (key === 'group') gName = value;
+        if (key === 'groupColor') gColor = value;
+      });
+
+      let groupId = null;
+      if (gName){
+        if (!groupMap.has(gName)){
+          groupMap.set(gName, {
+            id: uid(),
+            name: gName,
+            color: /^#[0-9a-fA-F]{6}$/.test(gColor) ? gColor : GROUP_PALETTE[groupMap.size % GROUP_PALETTE.length]
+          });
+        }
+        groupId = groupMap.get(gName).id;
+      }
+
+      newPoints.push({ lat, lng, name, groupId });
+    });
+
+    return { points: newPoints, groups: Array.from(groupMap.values()) };
+  }
+
+  function importKml(text){
+    let parsed;
+    try{
+      parsed = parseKml(text);
+    }catch(e){
+      showStatus('KMLを解析できませんでした', true);
+      return;
+    }
+    if (!parsed.points.length){
+      showStatus('KMLに地点が見つかりませんでした', true);
+      return;
+    }
+
+    points = parsed.points;
+    groups = parsed.groups;
+    nextPointNumber = points.length + 1;
+    nextGroupNumber = groups.length + 1;
+    voronoiActive = points.length >= 2;
+
+    if (groups.length === 0){
+      addGroup();
+      addGroup();
+    }
+    setMode('visual');
+
+    const b = L.latLngBounds(points.map(p => [p.lat, p.lng]));
+    map.fitBounds(b, { padding: [60, 60] });
+    renderAll();
+    showStatus(`${points.length}地点、${groups.length}グループを読み込みました`);
+  }
+
+  const fileInput = document.getElementById('file-input');
+  document.getElementById('import-btn').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => importKml(String(reader.result));
+    reader.onerror = () => showStatus('ファイルを読み込めませんでした', true);
+    reader.readAsText(file);
+    fileInput.value = '';
+  });
+
+  // Export: click downloads, shift/長押し相当として右クリックでテキスト表示
+  const exportBtn = document.getElementById('export-btn');
+  exportBtn.addEventListener('click', exportKml);
+  exportBtn.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!points.length){ showStatus('書き出す地点がありません', true); return; }
+    document.getElementById('kml-text').value = buildKml();
+    document.getElementById('kml-overlay').classList.add('open');
+  });
+
+  document.getElementById('kml-close-btn').addEventListener('click', () => {
+    document.getElementById('kml-overlay').classList.remove('open');
+  });
+  document.getElementById('kml-copy-btn').addEventListener('click', async () => {
+    const ta = document.getElementById('kml-text');
+    ta.select();
+    try{
+      await navigator.clipboard.writeText(ta.value);
+      showStatus('KMLをコピーしました');
+    }catch(e){
+      document.execCommand('copy');
+    }
+  });
+  document.getElementById('kml-overlay').addEventListener('click', e => {
+    if (e.target.id === 'kml-overlay') e.currentTarget.classList.remove('open');
+  });
+
+  // ---------- Init ----------
+  renderAll();
+})();
+</script>
+</body>
+</html>
